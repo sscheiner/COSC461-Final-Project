@@ -18,12 +18,12 @@ import javax.imageio.*;
 
 public class GroceryStore extends JPanel implements ActionListener {
 
-	public static double Clock, MeanStoreArrivalTime, MeanServiceTime,
-    MeanCheckoutTime, MeanSelectGoodsTime, MeanDepartStoreTime,
-    MeanCheckoutWaitTime, MeanPayBillTime, SIGMA, MeanCheckoutArrivalTime,
-LastEventTime,TotalBusy, MaxQueueLength, SumResponseTime;
-public static long NumberOfCustomers, QueueLength, NumberInService,
-TotalCustomersServiced, NumberOfDepartures;
+public static double Clock, MeanStoreArrivalTime, MeanServiceTime,
+                     MeanCheckoutTime, MeanSelectGoodsTime, MeanDepartStoreTime,
+                     MeanCheckoutWaitTime, MeanPayBillTime, SIGMA, MeanCheckoutArrivalTime,
+                     LastEventTime,TotalBusy, MaxQueueLength, SumResponseTime;
+public static int NumberOfCustomers, QueueLength, NumberInService,
+                  TotalCustomersServiced, NumberOfDepartures;
 public final static int enterStore = 1;
 public final static int selectGoods = 2;
 public final static int checkoutArrival = 3;
@@ -34,8 +34,8 @@ public static EventList FutureEventList;
 public static Queue CheckoutLine;
 public static Random stream;
 public final static long DURATION_IN_MINUTES = 60;
-public static double An; // nth customer inter arrival time (n = 5)
-public static double Sn; // nth customer service time (n = 5) 
+public static double An[] = new double[5]; // nth customer inter arrival time (n = 5)
+public static double Sn[] = new double[5]; // nth customer service time (n = 5) 
 public static Map<Double,Integer> customersAtTime = new HashMap();
 public static Map<Double,Integer> queueAtTime = new HashMap();
 public static Double TotalQueueTime = 0.0;
@@ -47,13 +47,20 @@ static BufferedImage StoreLayout = null;
 static BufferedImage GreenHuman  = null;
 static BufferedImage BlueHuman   = null;
 static BufferedImage RedHuman    = null;
-public static  int  custArrivals = 0;
+public static int custArrivals = 0;
 public static int custDepartures = 0;
 public static JPanel groceryStorePanel;
 public static JFrame groceryStoreFrame;
+public static double LRACustsInStore;
+public static double LRACustsInQueue;
+public static double LRATimeInStore;
+public static double LRATimeInQueue;
+public static double prevClock;
+public static double junk;
+
 
     // Create a timer controlling how long each event persists on screen (in milliseconds e.g. 1000 = 1 second)
-    Timer SimTimer = new Timer(150,this);
+    Timer SimTimer = new Timer(50,this);
 
     //Constructor
     GroceryStore() { 
@@ -68,11 +75,10 @@ public static JFrame groceryStoreFrame;
 	  MeanCheckoutWaitTime = 3.2;
 	  MeanCheckoutArrivalTime = 1.0;
 	  MeanPayBillTime = 2.0;
-	  MeanServiceTime = .75;
-	  SIGMA = 0.6;
+	  MeanServiceTime = 1.0;
+	  SIGMA = 0.66;
 	  TotalCustomersServiced = 0;
-	  long seed = 10000
-			  ; 
+	  long seed = 1000;	        
 	  stream = new Random(seed); // initialize rng stream
 	  FutureEventList = new EventList();
 	  CheckoutLine = new Queue(); // holds customers in checkout line
@@ -94,24 +100,26 @@ public static JFrame groceryStoreFrame;
       g2d.drawImage(StoreLayout, 0, 0, null);
     
       
+      // draw arriving customers in blue
       if (paintArrivingCustomer) {
     	  g2d.drawImage(BlueHuman, 175, 420, null);
     	  paintArrivingCustomer = false;
     	  custArrivals++;
       }
       
+      // draw departing customers in blue
       if (paintDepartingCustomer) {
     	  g2d.drawImage(BlueHuman, 720, 420, null);
     	  paintDepartingCustomer = false;
     	  custDepartures++;
       }
-      // draw the customers who are waiting in line to check out in red
+      // draw customers who are waiting in line to check out in red
       numHumans = CheckoutLine.getCustomerCount();
       for (i = 0; i < numHumans; i++)
         g2d.drawImage(RedHuman, 720 - 45*i, 160, null);
 
-      // draw the customers who are shopping in green 
-      numHumans = custArrivals - custDepartures - i; 
+      // draw customers who are shopping in green 
+      numHumans = custArrivals - custDepartures - i;
       for (i = 0; i < numHumans; i+=5)  { 
   	    g2d.drawImage(GreenHuman, 80, 150 + 15*i, null);
         if (i+1 < numHumans) g2d.drawImage(GreenHuman, 120, 150 + 15*i, null);   
@@ -120,18 +128,19 @@ public static JFrame groceryStoreFrame;
         if (i+4 < numHumans) g2d.drawImage(GreenHuman, 240, 150 + 15*i, null);   
       }     
       g2d.drawString("Time = " + Double.toString(Clock), 300, 50);
-      g2d.drawString("Number of Arrivals = " + custArrivals, 325, 440);
-      g2d.drawString("Number of Departures = " + custDepartures, 325, 465);
+      g2d.drawString("Number of Arrivals = " + custArrivals, 325, 415);
+      g2d.drawString("Number of Departures = " + custDepartures, 325, 440);
+      g2d.drawString("Number of Customers in Store = " + (custArrivals - custDepartures), 325, 465);
+      g2d.drawString("Length of Queue LQ(t) = " + CheckoutLine.getCustomerCount(), 325, 490);
     }
    
     // each time the simulation timer times out we execute one simulation event and update graphics
     @Override
     public void actionPerformed(ActionEvent arg0) {
 	   
-      Event evt = (Event)FutureEventList.getMin(); // get imminent event
-      Clock = evt.getTime();     // advance simulation time
-      //System.out.println("Entered timer. clock is: " + Clock);
-      if (evt != null) {
+      Event evt = (Event)FutureEventList.getMin();  // get imminent event
+      Clock = evt.getTime();                        // advance simulation time to time of this event
+      if (evt != null) { 
           FutureEventList.dequeue(); // be rid of it
           if (evt.getType() == enterStore)
             ProcessEnterStore(evt);
@@ -147,10 +156,13 @@ public static JFrame groceryStoreFrame;
              ProcessDepartStore(evt);
             }
       	      
-      //Clock++;    // increment clock one minute 
       repaint();  // update the graphics
-      
-      //System.out.println("Updating graphics at time" + Clock);
+      int custsInStore = custArrivals - custDepartures;
+      LRACustsInStore += custsInStore * (Clock - prevClock);
+      int custsInQueue = CheckoutLine.getCustomerCount();
+      LRACustsInQueue += custsInQueue * (Clock - prevClock);
+      prevClock = Clock;
+      // stop the timer and report statistics after 60 minutes of simulated time
       if (Clock >= DURATION_IN_MINUTES) {
     	endSimulationTime = evt.getTime(); // track end time of simulation
         ReportGeneration();
@@ -168,19 +180,16 @@ public static JFrame groceryStoreFrame;
       SumResponseTime = 0;
       NumberOfDepartures = 0;
     
-      // schedule first store arrival event
-      //Event evt = new Event(enterStore, exponential(stream,MeanStoreArrivalTime), new Customer());
-      
-      //Seed future event list with customer arrival events
+      //Seed future event list with the customer arrival events
       double arrivalTime = 0.0;
-      while(arrivalTime < DURATION_IN_MINUTES)
-      {
+      while(arrivalTime < DURATION_IN_MINUTES) {
     	  Event evt = new Event(enterStore, arrivalTime, new Customer());
     	  FutureEventList.enqueue(evt);
-    	  arrivalTime = arrivalTime + exponential(stream,MeanStoreArrivalTime);
+          if (evt.getCustomer().getId() < 6) // record 5th customer inter arrival time
+    	    An[evt.getCustomer().getId() - 1]  = arrivalTime;
+   	      arrivalTime = arrivalTime + exponential(stream,MeanStoreArrivalTime);
       } 
-      //System.out.println(FutureEventList.size() + " customers have entered the store");
-    }
+    }   
 
     private static void InitGraphics() {
 
@@ -206,7 +215,6 @@ public static JFrame groceryStoreFrame;
      }
    
    // Process a new customer arrival and transition them to select goods state
-   // Also schedule next customer arrival
    public static void ProcessEnterStore(Event evt) {
      evt.getCustomer().enterStore(evt);
      //System.out.println("A new customer has entered the store at time" + Clock);
@@ -227,28 +235,19 @@ public static JFrame groceryStoreFrame;
     // Process customer wait in line and transition them to pay bill
     public static void ProcessCheckoutArrival(Event evt) {
       evt.getCustomer().standInLine(evt);
-      //System.out.println("A customer has arrived at checkout line at time" + Clock);
-            
+      //System.out.println("A customer has arrived at checkout line at time" + Clock);            
       CheckoutLine.enqueue(evt);
       QueueLength++;
     
-      // if the server is idle, fetch the event, do statistics
-      // and put into service
-     if(NumberInService == 0) 
+      // if the server is idle, fetch the event, do statistics and put into service
+     if  (NumberInService == 0) {
         ScheduleCheckoutDeparture(evt.getCustomer());
+     }
      else TotalBusy += (Clock - LastEventTime);
      // server is busy
-      // adjust max queue length statistics
-     if(MaxQueueLength < QueueLength)
-        MaxQueueLength = QueueLength;
-          
-     // we add a new customer to store once each iteration (1 per minute)
-     /*double simulatedInterArrivalTime = exponential(stream, MeanStoreArrivalTime);
-     evt = new Event(enterStore, simulatedInterArrivalTime, new Customer());
-     if (evt.getCustomer().getId() == 5) // record 5th customer inter arrival time
-          An = simulatedInterArrivalTime;
-          
-     FutureEventList.enqueue(evt);*/
+       if(MaxQueueLength < QueueLength) // adjust max queue length statistics
+         MaxQueueLength = QueueLength;
+       
      LastEventTime = Clock;
     }
     
@@ -265,8 +264,9 @@ public static JFrame groceryStoreFrame;
       // get the job at the head of the queue
       while (( serviceTime = normal(stream, MeanServiceTime, SIGMA)) < 0 );
       Event depart = new Event(checkoutDeparture,Clock+serviceTime, customer);
-       if (customer.getId() == 5) // record 5th customer inter arrival time
-          Sn = serviceTime;
+       if (customer.getId() < 6) // record 5th customer inter arrival time
+          Sn [depart.getCustomer().getId() - 1] = serviceTime;
+       
       
       FutureEventList.enqueue(depart);
       NumberInService = 1;
@@ -276,8 +276,7 @@ public static JFrame groceryStoreFrame;
     public static void ProcessCheckoutDeparture(Event evt) {
       // get the customer description
       Event finished =(Event)CheckoutLine.dequeue();
-      // if there are customers in the queue then schedule
-      // the departure of the next one
+      // if there are customers in the queue then schedule the departure of the next one
       if(QueueLength > 0)
         ScheduleCheckoutDeparture(evt.getCustomer());
       else 
@@ -308,25 +307,23 @@ public static JFrame groceryStoreFrame;
     double AVGR = SumResponseTime/Customer.getCustomersPaidBill();
     System.out.println("SINGLE SERVER QUEUE SIMULATION - GROCERY STORE CHECKOUT COUNTER ");
     System.out.println("\tMEAN STORE ARRIVAL RATE (lambda): " + MeanStoreArrivalTime  + " CUSTOMER PER MINUTE");
-    System.out.println("\tNth(N=5) SIMULATED CUSTOMER STORE INTERARRIVAL TIME (An): " + An + " MINUTES");
+    System.out.println("\tNth SIMULATED CUSTOMER STORE INTERARRIVAL TIME (An): " + An[0] + ", " + An[1] + ", " + An[2] + ", " + An[3] + ", " + An[4] +" MINUTES ");
     //System.out.println("\tMEAN CHECKOUT LINE WAIT TIME: " + MeanCheckoutWaitTime + " MINUTES");
     System.out.println("\tAVG INTER ARRIVAL TIME TO CHECKOUT LINE: " + MeanCheckoutArrivalTime + " MINUTES");
     System.out.println("\tSTANDARD DEVIATION OF SERVICE TIMES: " + SIGMA );
-    System.out.println("\tNth(N=5) CUSTOMER SERVICE TIME (Sn): " + Sn + " MINUTES");
+    System.out.println("\tNth(N=5) CUSTOMER SERVICE TIME (Sn): " + Sn[0] + ", " + Sn[1] + ", " + Sn[2] + ", " + Sn[3] + ", " + Sn[4] +" MINUTES ");
     System.out.println("\tMEAN CASHIER (SERVER) RATE (mu): " + MeanServiceTime + " MINUTES PER CUSTOMER");
-    System.out.println("\tCUSTOMERS IN STORE AT TIME t L(t):");
     
     // Calculate time-average number of customers in store
-    Double LTotal = 0.0;
+    /*Double LTotal = 0.0;
     for (Double clock : customersAtTime.keySet()) {
       System.out.print(customersAtTime.get(clock));
       if (customersAtTime.get(clock)  > 0)
         LTotal += customersAtTime.get(clock);
       System.out.print(" " );
-    }
-    System.out.println("\n");
+    }*/
     // Calculate time-average number of customers in Checkout Queue
-    System.out.println("\tCUSTOMERS IN QUEUE AT TIME t LQ(t):");
+    //System.out.println("\tCUSTOMERS IN QUEUE AT TIME t LQ(t):");
     Double LQTotal = 0.0;
     for (Double clock : queueAtTime.keySet()) {
       System.out.print(queueAtTime.get(clock));
@@ -335,16 +332,18 @@ public static JFrame groceryStoreFrame;
       System.out.print(" " );
     }
     System.out.println();
-    System.out.println("\tLONG-RUN TIME-AVERAGE NUMBER OF CUSTOMERS IN SYSTEM (L): " + LTotal/DURATION_IN_MINUTES);
-    System.out.println("\tLONG-RUN TIME-AVERAGE NUMBER OF CUSTOMERS IN QUEUE (LQ): " + LQTotal/DURATION_IN_MINUTES + " CUSTOMERS PER MINUTE");
+    System.out.println("\tLONG-RUN TIME-AVERAGE NUMBER OF CUSTOMERS IN SYSTEM (L): " + LRACustsInStore/Clock);
+    System.out.println("\tLONG-RUN TIME-AVERAGE NUMBER OF CUSTOMERS IN QUEUE (LQ): " + LRACustsInQueue/Clock);
     Double TotalCustomersTimeInStore = 0.0;
     for (Customer cust : Customer.getEnteredStore()) {
-        if (cust.getDepartTime() > 0)
+        if (cust.getDepartTime() > 0){
           TotalCustomersTimeInStore += (cust.getDepartTime() - cust.getEnterTime());
+        junk = cust.getDepartTime() - cust.getEnterTime();
+        }
         else 
          TotalCustomersTimeInStore += (DURATION_IN_MINUTES - cust.getEnterTime());
     }
-    System.out.println("\tLONG-RUN AVERAGE_TIME SPENT IN STORE PER CUSTOMER (w): " + TotalCustomersTimeInStore/Customer.getEnteredStore().size() + " MINUTES");
+    System.out.println("\tLONG-RUN AVERAGE_TIME SPENT IN STORE PER CUSTOMER (w): " + LRACustsInStore/custArrivals + " MINUTES");
     Double TotalCustomersTimeInQueue = 0.0;
     for (Customer cust : Customer.getEnteredCheckout()) {
         if (cust.getDepartQueueTime() > 0)
@@ -352,7 +351,7 @@ public static JFrame groceryStoreFrame;
         else
            TotalCustomersTimeInQueue +=   (DURATION_IN_MINUTES - cust.getEnterQueueTime());
     }
-    System.out.println("\tLONG-RUN AVERAGE_TIME SPENT IN QUEUE PER CUSTOMER (wQ): " + TotalCustomersTimeInQueue/Customer.getEnteredStore().size() + " MINUTES");
+    System.out.println("\tLONG-RUN AVERAGE_TIME SPENT IN QUEUE PER CUSTOMER (wQ): " + LRACustsInQueue/custArrivals + " MINUTES");
   
     System.out.println("\tSERVER UTILIZATION (phi): " + serverUtilization );
     System.out.println("\tMAXIMUM CHECKOUT LINE LENGTH: " + MaxQueueLength + " CUSTOMERS");
@@ -362,8 +361,9 @@ public static JFrame groceryStoreFrame;
     System.out.println("\tNUMBER OF CUSTOMERS SELECTED GOODS :" + Customer.getCustomersSelectedGoods());
     System.out.println("\tNUMBER OF CUSTOMERS ARRIVED AT CHECKOUT LINE: " + Customer.getCustomersEnteredCheckoutLine());
     System.out.println("\tNUMBER OF CUSTOMERS PAID BILL: " + Customer.getCustomersPaidBill());
-    System.out.println("\tNUMBER OF CUSTOMERS DEPARTED STORE: " + Customer.getCustomersDepartedStore());
-    System.out.println("\tNUMBER OF CUSTOMERS IN STORE: " + Customer.customersInStore.size());
+    System.out.println("\tNUMBER OF CUSTOMERS DEPARTED STORE: " + custDepartures);
+    System.out.println("\tNUMBER OF CUSTOMERS IN STORE L(t): " + (custArrivals - custDepartures));
+    System.out.println("\tCUSTOMERS IN QUEUE AT TIME t LQ(t): " + CheckoutLine.getCustomerCount());
     }
 
     public static double exponential(Random rng, double mean) {
@@ -386,6 +386,7 @@ public static JFrame groceryStoreFrame;
       NumNormals=0;
       ReturnNormal = SaveNormal;
     }
+    
     return ReturnNormal*sigma + mean ;
     }
 }
